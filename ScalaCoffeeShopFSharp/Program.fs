@@ -124,7 +124,14 @@ module CoffeeHouse =
 
       typedActorOf4 run runSystem Map.empty mailbox
 
-    spawn system "coffee-house" run
+    let decider (ex: exn) = 
+      match ex with 
+      | :? Guest.CaffeineException -> Directive.Stop 
+      | _ -> Directive.Restart
+
+    spawnOpt system "coffee-house" run [
+      SpawnOption.SupervisorStrategy(Strategy.OneForOne decider)
+    ]
 
 let run() =
   let config = Configuration.load()
