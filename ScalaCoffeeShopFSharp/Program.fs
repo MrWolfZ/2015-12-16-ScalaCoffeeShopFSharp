@@ -42,7 +42,10 @@ module Barista =
       match msg with
       | PrepareCoffee (c, g) -> 
         // TODO: read time from config
-        scheduleOnce (TimeSpan.FromSeconds 0.5) (mailbox.Sender()) (CoffeePrepared(c, g)) mailbox
+        mailbox.Sender() <! Async.RunSynchronously(async {
+          do! Async.Sleep 500
+          return CoffeePrepared(c, g)
+        })
     ))
 
 module Guest =
@@ -130,7 +133,7 @@ let run() =
   let coffeeHouse = CoffeeHouse.create system
 
   coffeeHouse <! Message.CreateGuest(Akkaccino, 2)
-  // coffeeHouse <! Message.CreateGuest(CaffeScala, 2)
+  coffeeHouse <! Message.CreateGuest(CaffeScala, 2)
 
   Console.ReadKey() |> ignore
 
