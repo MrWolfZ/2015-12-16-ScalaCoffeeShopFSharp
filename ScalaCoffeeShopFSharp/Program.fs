@@ -48,7 +48,7 @@ module Barista =
 module Guest =
   open Message
 
-  let create system id waiter favCoffee = 
+  let create system waiter favCoffee = 
 
     let actor =
       let run (mailbox: Actor<obj>) =
@@ -68,7 +68,7 @@ module Guest =
 
         typedActorOf3 run 0 mailbox
 
-      spawn system (string id) run
+      spawn system null run
       
     waiter.Tell(Waiter.ServeCoffee favCoffee, actor)
     actor
@@ -87,26 +87,33 @@ module CoffeeHouse =
 
       mailbox.Defer (fun () -> Logging.logInfo mailbox "CoffeeHouse Closed")
 
-      let run _ (guestBook, lastGuestId) msg =
+      let run _ guestBook msg =
         match msg with
         | CreateGuest c -> 
-          let guest = Guest.create mailbox.Context lastGuestId waiter c
+          let guest = Guest.create mailbox.Context waiter c
           let updatedGuestBook = Map.add guest 0 guestBook
           Logging.logInfof mailbox "Guest %A added to guest book" guest
-          (updatedGuestBook, lastGuestId + 1)
+          monitor guest mailbox |> ignore
+          updatedGuestBook
         | ApproveCoffee(c, g) ->
           let guestCaffeine = Map.find g guestBook
           if guestCaffeine < caffeineLimit then
             let updatedGuestBook = Map.add g (guestCaffeine + 1) guestBook
             Logging.logInfof mailbox "Guest %A caffeeine count incremented" g
-            barista.Tell(PrepareCoffee(c, g), mailbox.Sender())
-            (updatedGuestBook, lastGuestId)
+            barista.Forward(PrepareCoffee(c, g))
+            updatedGuestBook
           else
             Logging.logInfof mailbox "Sorry, %A, you have reached your limit" g
             mailbox.Context.Stop g
-            (guestBook, lastGuestId)
+            guestBook
 
-      typedActorOf3 run (Map.empty, 0) mailbox
+      let runSystem _ guestBook sysMsg =
+        match sysMsg with
+        | Terminated t ->
+          Logging.logInfof mailbox "Thanks %A, for being our guest!" t.ActorRef
+          Map.remove t.ActorRef guestBook
+
+      typedActorOf4 run runSystem Map.empty mailbox
 
     spawn system "coffee-house" run
 
