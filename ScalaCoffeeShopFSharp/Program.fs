@@ -12,7 +12,7 @@ type Coffee =
 
 module Message =
   type CoffeeHouse =
-  | CreateGuest of favCoffee: Coffee
+  | CreateGuest of favCoffee: Coffee * caffeineLimit: int
   | ApproveCoffee of coffee: Coffee * guest: IActorRef
 
   type Guest =
@@ -48,11 +48,15 @@ module Barista =
 module Guest =
   open Message
 
-  let create system waiter favCoffee = 
+  type CaffeineException() =
+    inherit InvalidOperationException("Too much caffeine!")
+
+  let create system waiter favCoffee caffeineLimit = 
 
     let actor =
       let run (mailbox: Actor<obj>) =
         mailbox.Defer (fun () -> Logging.logInfo mailbox "Goodbye!")
+        waiter <! Waiter.ServeCoffee favCoffee
 
         let run mailbox coffeeCount msg =
           match msg with
@@ -63,6 +67,9 @@ module Guest =
             scheduleOnce (TimeSpan.FromSeconds 1.0) mailbox.Self CoffeeFinished mailbox
             newCoffeeCount
           | CoffeeFinished ->
+            if coffeeCount > caffeineLimit then
+              raise (new CaffeineException())
+
             waiter <! Waiter.ServeCoffee favCoffee
             coffeeCount
 
@@ -70,14 +77,13 @@ module Guest =
 
       spawn system null run
       
-    waiter.Tell(Waiter.ServeCoffee favCoffee, actor)
     actor
 
 module CoffeeHouse =
   open Message
   
   let create system = 
-    let caffeineLimit = 3 // TODO: read from config
+    let caffeineLimit = 5 // TODO: read from config
 
     let run (mailbox: Actor<obj>) =
       let barista = Barista.create mailbox.Context "barista"
@@ -89,8 +95,8 @@ module CoffeeHouse =
 
       let run _ guestBook msg =
         match msg with
-        | CreateGuest c -> 
-          let guest = Guest.create mailbox.Context waiter c
+        | CreateGuest (c, l) -> 
+          let guest = Guest.create mailbox.Context waiter c l
           let updatedGuestBook = Map.add guest 0 guestBook
           Logging.logInfof mailbox "Guest %A added to guest book" guest
           monitor guest mailbox |> ignore
@@ -123,8 +129,8 @@ let run() =
 
   let coffeeHouse = CoffeeHouse.create system
 
-  coffeeHouse <! Message.CreateGuest Akkaccino
-  coffeeHouse <! Message.CreateGuest CaffeScala
+  coffeeHouse <! Message.CreateGuest(Akkaccino, 2)
+  // coffeeHouse <! Message.CreateGuest(CaffeScala, 2)
 
   Console.ReadKey() |> ignore
 
