@@ -49,20 +49,26 @@ module Guest =
   open Message
 
   let create system id waiter favCoffee = 
-    let run mailbox coffeeCount msg =
-      match msg with
-      | CoffeeServed c -> 
-        let newCoffeeCount = coffeeCount + 1
-        Logging.logInfof mailbox "Enjoying my %d yummy %A!" newCoffeeCount c
-        // TODO: read time from config
-        scheduleOnce (TimeSpan.FromSeconds 1.0) mailbox.Self CoffeeFinished mailbox
-        newCoffeeCount
-      | CoffeeFinished ->
-        waiter <! Waiter.ServeCoffee favCoffee
-        coffeeCount
 
-    let actor = 
-      spawn system (string id) (typedActorOf3 run 0)
+    let actor =
+      let run (mailbox: Actor<obj>) =
+        mailbox.Defer (fun () -> Logging.logInfo mailbox "Goodbye!")
+
+        let run mailbox coffeeCount msg =
+          match msg with
+          | CoffeeServed c -> 
+            let newCoffeeCount = coffeeCount + 1
+            Logging.logInfof mailbox "Enjoying my %d yummy %A!" newCoffeeCount c
+            // TODO: read time from config
+            scheduleOnce (TimeSpan.FromSeconds 1.0) mailbox.Self CoffeeFinished mailbox
+            newCoffeeCount
+          | CoffeeFinished ->
+            waiter <! Waiter.ServeCoffee favCoffee
+            coffeeCount
+
+        typedActorOf3 run 0 mailbox
+
+      spawn system (string id) run
       
     waiter.Tell(Waiter.ServeCoffee favCoffee, actor)
     actor
@@ -71,25 +77,34 @@ module CoffeeHouse =
   open Message
   
   let create system = 
-    let caffeineLimit = 5 // TODO: read from config
+    let caffeineLimit = 3 // TODO: read from config
 
     let run (mailbox: Actor<obj>) =
       let barista = Barista.create mailbox.Context "barista"
       let waiter = Waiter.create mailbox.Context "waiter" mailbox.Self
 
-      Logging.logDebug mailbox "CoffeeHouse Open"
+      Logging.logInfo mailbox "CoffeeHouse Open"
 
-      mailbox.Defer (fun () -> Logging.logDebug mailbox "CoffeeHouse Closed")
+      mailbox.Defer (fun () -> Logging.logInfo mailbox "CoffeeHouse Closed")
 
       let run _ (guestBook, lastGuestId) msg =
         match msg with
         | CreateGuest c -> 
           let guest = Guest.create mailbox.Context lastGuestId waiter c
+          let updatedGuestBook = Map.add guest 0 guestBook
           Logging.logInfof mailbox "Guest %A added to guest book" guest
-          (Map.add guest 0 guestBook, lastGuestId + 1)
+          (updatedGuestBook, lastGuestId + 1)
         | ApproveCoffee(c, g) ->
-          barista.Tell(PrepareCoffee(c, g), mailbox.Sender())
-          (guestBook, lastGuestId)
+          let guestCaffeine = Map.find g guestBook
+          if guestCaffeine < caffeineLimit then
+            let updatedGuestBook = Map.add g (guestCaffeine + 1) guestBook
+            Logging.logInfof mailbox "Guest %A caffeeine count incremented" g
+            barista.Tell(PrepareCoffee(c, g), mailbox.Sender())
+            (updatedGuestBook, lastGuestId)
+          else
+            Logging.logInfof mailbox "Sorry, %A, you have reached your limit" g
+            mailbox.Context.Stop g
+            (guestBook, lastGuestId)
 
       typedActorOf3 run (Map.empty, 0) mailbox
 
