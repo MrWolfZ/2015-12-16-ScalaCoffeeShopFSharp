@@ -27,3 +27,6 @@ let typedActorOf2<'Message> fn (mailbox: Actor<obj>) =
 let typedActorOf<'Message> fn (mailbox: Actor<obj>) = 
   typedActorOf2<'Message> (fun _ msg -> fn msg) mailbox
 
+let scheduleOnce delay receiver message (actor: Actor<'T>) =
+  actor.Context.System.Scheduler.ScheduleTellOnce(delay, receiver, message)
+

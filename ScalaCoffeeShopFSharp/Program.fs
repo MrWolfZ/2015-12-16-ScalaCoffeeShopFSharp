@@ -42,26 +42,27 @@ module Barista =
       match msg with
       | PrepareCoffee (c, g) -> 
         // TODO: read time from config
-        mailbox.Context.System.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(1.0), mailbox.Sender(), CoffeePrepared(c, g))
+        scheduleOnce (TimeSpan.FromSeconds 0.5) (mailbox.Sender()) (CoffeePrepared(c, g)) mailbox
     ))
 
 module Guest =
   open Message
+
   let create system id waiter favCoffee = 
-    let actor = 
-      spawn system (string id) (typedActorOf3 (fun mailbox coffeeCount msg ->
+    let run mailbox coffeeCount msg =
       match msg with
       | CoffeeServed c -> 
         let newCoffeeCount = coffeeCount + 1
         Logging.logInfof mailbox "Enjoying my %d yummy %A!" newCoffeeCount c
         // TODO: read time from config
-        mailbox.Context.System.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(2.0), mailbox.Self, CoffeeFinished)
+        scheduleOnce (TimeSpan.FromSeconds 1.0) mailbox.Self CoffeeFinished mailbox
         newCoffeeCount
       | CoffeeFinished ->
         waiter <! Waiter.ServeCoffee favCoffee
         coffeeCount
-      ) 
-      0)
+
+    let actor = 
+      spawn system (string id) (typedActorOf3 run 0)
       
     waiter.Tell(Waiter.ServeCoffee favCoffee, actor)
     actor
@@ -71,7 +72,8 @@ module CoffeeHouse =
   
   let create system = 
     let caffeineLimit = 5 // TODO: read from config
-    spawn system "coffee-house" (fun mailbox -> 
+
+    let run (mailbox: Actor<obj>) =
       let barista = Barista.create mailbox.Context "barista"
       let waiter = Waiter.create mailbox.Context "waiter" mailbox.Self
 
@@ -79,18 +81,19 @@ module CoffeeHouse =
 
       mailbox.Defer (fun () -> Logging.logDebug mailbox "CoffeeHouse Closed")
 
-      typedActorOf3
-        (fun mailbox (guestBook, lastGuestId) msg ->
-          match msg with
-          | CreateGuest c -> 
-            let guest = Guest.create mailbox.Context lastGuestId waiter c
-            Logging.logInfof mailbox "Guest %A added to guest book" guest
-            (Map.add guest 0 guestBook, lastGuestId + 1)
-          | ApproveCoffee(c, g) ->
-            barista.Tell(PrepareCoffee(c, g), mailbox.Sender())
-            (guestBook, lastGuestId)
-        ) (Map.empty, 0) mailbox
-    )
+      let run _ (guestBook, lastGuestId) msg =
+        match msg with
+        | CreateGuest c -> 
+          let guest = Guest.create mailbox.Context lastGuestId waiter c
+          Logging.logInfof mailbox "Guest %A added to guest book" guest
+          (Map.add guest 0 guestBook, lastGuestId + 1)
+        | ApproveCoffee(c, g) ->
+          barista.Tell(PrepareCoffee(c, g), mailbox.Sender())
+          (guestBook, lastGuestId)
+
+      typedActorOf3 run (Map.empty, 0) mailbox
+
+    spawn system "coffee-house" run
 
 let run() =
   let config = Configuration.load()
