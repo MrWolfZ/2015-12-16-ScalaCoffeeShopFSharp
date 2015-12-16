@@ -1,6 +1,8 @@
 ﻿module Actor
 
+open System.Reflection
 open Akka.Actor
+open Akka.Event
 open Akka.FSharp
 
 type SystemMessage =
@@ -14,8 +16,10 @@ let private handleUntypedMessage<'Message, 'State> fn sysFn (state: 'State) (mai
       return fn mailbox state m
     | :? Terminated as t -> 
       return sysFn mailbox state (Terminated t)
-    | _ -> 
-      mailbox.Context.System.DeadLetters <! message
+    | m -> 
+      let ci = Array.item 0 <| typeof<UnhandledMessage>.GetConstructors(BindingFlags.NonPublic ||| BindingFlags.Instance)
+      let unhandled = ci.Invoke [| m; mailbox.Sender(); mailbox.Self |] :?> UnhandledMessage
+      mailbox.Context.System.EventStream.Publish unhandled
       return state
   }
 
