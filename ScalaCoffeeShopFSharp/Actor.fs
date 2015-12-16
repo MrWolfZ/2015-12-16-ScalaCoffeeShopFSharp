@@ -28,7 +28,10 @@ let typedActorOf4<'Message, 'State> fn sysFn (initialState: 'State) (mailbox: Ac
       loop initialState
 
 let typedActorOf3<'Message, 'State> fn (initialState: 'State) (mailbox: Actor<obj>) = 
-  typedActorOf4<'Message, 'State> fn (fun _ s _ -> s) initialState mailbox
+  let runSystem _ _ = function
+  | Terminated t -> raise <| new DeathPactException(t.ActorRef)
+
+  typedActorOf4<'Message, 'State> fn runSystem initialState mailbox
 
 let typedActorOf2<'Message> fn (mailbox: Actor<obj>) = 
   typedActorOf3<'Message, unit> (fun m _ msg -> fn m msg) () mailbox
