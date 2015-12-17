@@ -22,9 +22,13 @@ module Coffee =
     |> getRandArrElement
 
 module Message =
+  type App =
+  | Status of guestCount: int
+
   type CoffeeHouse =
   | CreateGuest of favCoffee: Coffee.T * caffeineLimit: int
   | ApproveCoffee of coffee: Coffee.T * guest: IActorRef
+  | GetStatus
 
   type Guest =
   | CoffeeServed of coffee: Coffee.T
@@ -162,6 +166,9 @@ module CoffeeHouse =
             Logging.logInfof mailbox "Sorry, %A, you have reached your limit" g
             mailbox.Context.Stop g
             guestBook
+        | GetStatus ->
+          mailbox.Sender() <! Status (Seq.length guestBook)
+          guestBook
 
       let runSystem _ guestBook sysMsg =
         match sysMsg with
@@ -186,6 +193,7 @@ module CoffeeHouse =
     ]
     
 open Coffee
+open Message
 
 let run() =
 
@@ -193,10 +201,17 @@ let run() =
   use system = System.create "coffee-house-system" config
   let caffeineLimit = system.Settings.Config.GetInt "coffee-house.caffeine-limit"
   let guestCaffeineLimit = system.Settings.Config.GetInt("coffee-house.guest.caffeine-limit", Int32.MaxValue)
+  let getStatusTimeout = system.Settings.Config.GetTimeSpan("coffee-house.status-timeout")
 
   let coffeeHouse = CoffeeHouse.create system caffeineLimit
 
-  do for i in [1..10] do coffeeHouse <! Message.CreateGuest(Akkaccino, guestCaffeineLimit)
+  do for i in [1..10] do coffeeHouse <! CreateGuest(Akkaccino, guestCaffeineLimit)
+
+  Async.Start(async {
+    do! Async.Sleep 2000
+    let! (Status guestCount) = coffeeHouse.Ask(GetStatus, getStatusTimeout)
+    system.Log.Info(sprintf "Guest count: %d" guestCount)
+  })
 
   Console.ReadKey() |> ignore
 
