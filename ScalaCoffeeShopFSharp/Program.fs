@@ -41,8 +41,12 @@ module Message =
 module Waiter =
   open Message
 
-  type FrustratedException() =
+  type FrustratedException(waiter: IActorRef, coffee: Coffee.T, guest: IActorRef) =
     inherit InvalidOperationException("Waiter is frustrated!")
+    with
+      member this.Waiter = waiter
+      member this.Coffee = coffee
+      member this.Guest = guest
 
   let create system name coffeeHouse barista maxComplaintCount =
     spawn system name (typedActorOf3 (fun mailbox complaintCount msg ->
@@ -54,7 +58,7 @@ module Waiter =
         g <! Guest.CoffeeServed c
         complaintCount
       | Complaint(c) when complaintCount >= maxComplaintCount ->
-        raise <| new FrustratedException()
+        raise <| new FrustratedException(mailbox.Self, c, mailbox.Sender())
       | Complaint(c) ->
         barista <! PrepareCoffee(c, mailbox.Sender())
         complaintCount + 1
@@ -167,7 +171,15 @@ module CoffeeHouse =
     let decider (ex: exn) = 
       match ex with 
       | :? Guest.CaffeineException -> Directive.Stop
+      | :? Waiter.FrustratedException as ex ->
+        Async.Start(async {
+          let baristaSelection = select "user/coffee-house/barista" system
+          let waiterSelection = select "user/coffee-house/waiter" system
+          baristaSelection.Tell(PrepareCoffee(ex.Coffee, ex.Guest), ex.Waiter)
+        })
+        Directive.Restart
       | _ -> SupervisorStrategy.DefaultDecider.Decide ex
+
 
     spawnOpt system "coffee-house" run [
       SpawnOption.SupervisorStrategy(Strategy.OneForOne decider)
@@ -178,7 +190,7 @@ open Coffee
 let run() =
 
   let config = Configuration.load()
-  use system = System.create "my-system" config
+  use system = System.create "coffee-house-system" config
   let caffeineLimit = system.Settings.Config.GetInt "coffee-house.caffeine-limit"
 
   let coffeeHouse = CoffeeHouse.create system caffeineLimit
