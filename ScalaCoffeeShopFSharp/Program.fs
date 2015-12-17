@@ -28,6 +28,7 @@ module Message =
 
 module Waiter =
   open Message
+
   let create system name coffeeHouse =
     spawn system name (typedActorOf2 (fun mailbox msg ->
       match msg with
@@ -37,13 +38,13 @@ module Waiter =
 
 module Barista =
   open Message
-  let create system name =
+
+  let create system name (prepareCoffeeDuration: TimeSpan) =
     spawn system name (typedActorOf2 (fun mailbox msg ->
       match msg with
       | PrepareCoffee (c, g) -> 
-        // TODO: read time from config
         mailbox.Sender() <! Async.RunSynchronously(async {
-          do! Async.Sleep 500
+          do! Async.Sleep (int prepareCoffeeDuration.TotalMilliseconds)
           return CoffeePrepared(c, g)
         })
     ))
@@ -54,7 +55,7 @@ module Guest =
   type CaffeineException() =
     inherit InvalidOperationException("Too much caffeine!")
 
-  let create system waiter favCoffee caffeineLimit = 
+  let create system waiter favCoffee finishCoffeeDuration caffeineLimit = 
 
     let actor =
       let run (mailbox: Actor<obj>) =
@@ -66,12 +67,11 @@ module Guest =
           | CoffeeServed c -> 
             let newCoffeeCount = coffeeCount + 1
             Logging.logInfof mailbox "Enjoying my %d yummy %A!" newCoffeeCount c
-            // TODO: read time from config
-            scheduleOnce (TimeSpan.FromSeconds 1.0) mailbox.Self CoffeeFinished mailbox
+            scheduleOnce finishCoffeeDuration mailbox.Self CoffeeFinished mailbox
             newCoffeeCount
           | CoffeeFinished ->
             if coffeeCount > caffeineLimit then
-              raise (new CaffeineException())
+              raise <| new CaffeineException()
 
             waiter <! Waiter.ServeCoffee favCoffee
             coffeeCount
@@ -85,11 +85,13 @@ module Guest =
 module CoffeeHouse =
   open Message
   
-  let create system = 
-    let caffeineLimit = 5 // TODO: read from config
-
+  let create system caffeineLimit = 
     let run (mailbox: Actor<obj>) =
-      let barista = Barista.create mailbox.Context "barista"
+    
+      let finishCoffeeDuration = mailbox.Context.System.Settings.Config.GetTimeSpan "coffee-house.guest.finish-coffee-duration"
+      let prepareCoffeeDuration = mailbox.Context.System.Settings.Config.GetTimeSpan "coffee-house.barista.prepare-coffee-duration"
+
+      let barista = Barista.create mailbox.Context "barista" prepareCoffeeDuration
       let waiter = Waiter.create mailbox.Context "waiter" mailbox.Self
 
       Logging.logInfo mailbox "CoffeeHouse Open"
@@ -99,7 +101,7 @@ module CoffeeHouse =
       let run _ guestBook msg =
         match msg with
         | CreateGuest (c, l) -> 
-          let guest = Guest.create mailbox.Context waiter c l
+          let guest = Guest.create mailbox.Context waiter c finishCoffeeDuration l
           let updatedGuestBook = Map.add guest 0 guestBook
           Logging.logInfof mailbox "Guest %A added to guest book" guest
           monitor guest mailbox |> ignore
@@ -136,8 +138,9 @@ module CoffeeHouse =
 let run() =
   let config = Configuration.load()
   use system = System.create "my-system" config
+  let caffeineLimit = system.Settings.Config.GetInt "coffee-house.caffeine-limit"
 
-  let coffeeHouse = CoffeeHouse.create system
+  let coffeeHouse = CoffeeHouse.create system caffeineLimit
 
   coffeeHouse <! Message.CreateGuest(Akkaccino, 2)
   coffeeHouse <! Message.CreateGuest(CaffeScala, 2)
