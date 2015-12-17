@@ -192,11 +192,11 @@ let run() =
   let config = Configuration.load()
   use system = System.create "coffee-house-system" config
   let caffeineLimit = system.Settings.Config.GetInt "coffee-house.caffeine-limit"
+  let guestCaffeineLimit = system.Settings.Config.GetInt("coffee-house.guest.caffeine-limit", Int32.MaxValue)
 
   let coffeeHouse = CoffeeHouse.create system caffeineLimit
 
-  coffeeHouse <! Message.CreateGuest(Akkaccino, 2)
-  // coffeeHouse <! Message.CreateGuest(CaffeScala, 2)
+  do for i in [1..5] do coffeeHouse <! Message.CreateGuest(Akkaccino, guestCaffeineLimit)
 
   Console.ReadKey() |> ignore
 
