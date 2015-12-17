@@ -128,8 +128,8 @@ module CoffeeHouse =
 
     let decider (ex: exn) = 
       match ex with 
-      | :? Guest.CaffeineException -> Directive.Stop 
-      | _ -> Directive.Restart
+      | :? Guest.CaffeineException -> Directive.Stop
+      | _ -> SupervisorStrategy.DefaultDecider.Decide ex
 
     spawnOpt system "coffee-house" run [
       SpawnOption.SupervisorStrategy(Strategy.OneForOne decider)
