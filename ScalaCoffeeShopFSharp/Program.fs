@@ -66,6 +66,7 @@ module Waiter =
 
 module Barista =
   open Message
+  open Akka.Routing
 
   let create system name (prepareCoffeeDuration: TimeSpan) accuracy =
     let run (mailbox: Actor<obj>) =
@@ -83,7 +84,9 @@ module Barista =
 
       typedActorOf2 run mailbox
 
-    spawn system name run
+    spawnOpt system name run [
+      SpawnOption.Router(FromConfig.Instance)
+    ]
 
 module Guest =
   open Message
@@ -193,7 +196,7 @@ let run() =
 
   let coffeeHouse = CoffeeHouse.create system caffeineLimit
 
-  do for i in [1..5] do coffeeHouse <! Message.CreateGuest(Akkaccino, guestCaffeineLimit)
+  do for i in [1..10] do coffeeHouse <! Message.CreateGuest(Akkaccino, guestCaffeineLimit)
 
   Console.ReadKey() |> ignore
 
