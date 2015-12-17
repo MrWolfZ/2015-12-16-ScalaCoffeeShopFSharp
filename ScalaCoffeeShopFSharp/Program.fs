@@ -172,11 +172,8 @@ module CoffeeHouse =
       match ex with 
       | :? Guest.CaffeineException -> Directive.Stop
       | :? Waiter.FrustratedException as ex ->
-        Async.Start(async {
-          let baristaSelection = select "user/coffee-house/barista" system
-          let waiterSelection = select "user/coffee-house/waiter" system
-          baristaSelection.Tell(PrepareCoffee(ex.Coffee, ex.Guest), ex.Waiter)
-        })
+        let barista = select "user/coffee-house/barista" system
+        barista.Tell(PrepareCoffee(ex.Coffee, ex.Guest), ex.Waiter)
         Directive.Restart
       | _ -> SupervisorStrategy.DefaultDecider.Decide ex
 
